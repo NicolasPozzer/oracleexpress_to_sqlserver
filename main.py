@@ -12,54 +12,64 @@ try:
         server="DESKTOP-NICO",
         database="compare_data"  # Name DB SQL Server
     )
-    print("Succesful connection to SQL Server!")
+    print("Successful connection to SQL Server!")
 except db.Error as ex:
     print("Error Connecting to SQL Server!", ex)
 
 try:
-    # Crear tabla espejo en SQL Server si no existe
+    # Create mirror table in SQL Server if it doesn't exist
     cursor_sql = conn_sql.cursor()
     try:
         cursor_sql.execute(queries.create_mirror_table)
         cursor_sql.commit()
-        print("Tabla mirror_table creada en SQL Server.")
+        print("Mirror_table created in SQL Server.")
     except db.Error:
-        print("Mirror Table Exist!")
+        print("Mirror Table Exists!")
 
     ############ Oracle Logic ############
 
-    # Conexión a Oracle y lectura de datos
+    # Connection to Oracle and data reading
     dsn_tns = cx_Oracle.makedsn('localhost', '1521', service_name='XE')
     conn_oracle = cx_Oracle.connect(user='nico', password='root', dsn=dsn_tns)
-    print("Conexión exitosa a Oracle!")
+    print("Successful connection to Oracle!")
 
     cursor_oracle = conn_oracle.cursor()
     cursor_oracle.execute(queries.query_oracle)
 
-    # Obtener todos los resultados de Oracle
+    # Fetch all results from Oracle
     rows_oracle = cursor_oracle.fetchall()
 
-    # Convertir los resultados en un DataFrame de Pandas
+    # Convert results into a Pandas DataFrame
     df_oracle = pd.DataFrame(rows_oracle, columns=[desc[0] for desc in cursor_oracle.description])
 
     if not df_oracle.empty:
-        # Transferir datos a SQL Server de manera dinámica
+        # Transfer data to SQL Server dynamically
         columns = list(df_oracle.columns)
         placeholders = ','.join(['?'] * len(columns))
         insert_query = f"INSERT INTO mirror_table ({','.join(columns)}) VALUES ({placeholders})"
 
-        # Ejecutar la inserción en SQL Server
-        cursor_sql.fast_executemany = True
-        cursor_sql.executemany(insert_query, df_oracle.values.tolist())
-        conn_sql.commit()
+        # Check if rows already exist in mirror_table
+        existing_ids_query = "SELECT ID FROM mirror_table"
+        existing_ids = pd.read_sql(existing_ids_query, conn_sql)['ID'].tolist()
 
-        print(f"Se han transferido {len(df_oracle)} filas desde Oracle a SQL Server.")
+        # Filter out rows that already exist
+        df_to_insert = df_oracle[~df_oracle['ID'].isin(existing_ids)]
+
+        if not df_to_insert.empty:
+            # Execute the insertion in SQL Server
+            cursor_sql.fast_executemany = True
+            cursor_sql.executemany(insert_query, df_to_insert.values.tolist())
+            conn_sql.commit()
+
+            print(f"{len(df_to_insert)} rows have been transferred from Oracle to SQL Server.")
+        else:
+            print("All rows already exist in mirror_table. No new rows added.")
     else:
-        print("No se encontraron filas en la tabla ORACLE_TABLE en Oracle.")
+        print("No rows found in ORACLE_TABLE in Oracle.")
 
     ############ SQL Server Logic ############
 
-    #Compare if exist new data
+    # Compare if there are new data
     verify_and_add_column(conn_sql, 'mirror_table', 'isNew_element', 'VARCHAR(50)')
 
     main_table = pd.read_sql(select_main_table, conn_sql)
@@ -82,11 +92,11 @@ try:
         cursor.execute(update_query, row['isNew_element'], row['ID'])
 
     conn_sql.commit()
-    print("Compare and update successfully.")
+    print("Compare and update successful.")
 except Exception as ex:
-    print("Error to execute:", ex)
+    print("Error executing:", ex)
 finally:
-    # Cerrar conexiones
+    # Close connections
     if 'conn_sql' in locals():
         conn_sql.close()
     if 'conn_oracle' in locals():
