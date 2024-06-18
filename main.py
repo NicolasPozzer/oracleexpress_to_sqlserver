@@ -4,6 +4,7 @@ import cx_Oracle
 from src import queries
 from src.queries import select_main_table, select_mirror_table
 from src.verify_data_function import verify_and_add_column
+import warnings
 
 # Connection to Database
 try:
@@ -17,6 +18,8 @@ except db.Error as ex:
     print("Error Connecting to SQL Server!", ex)
 
 try:
+    # Ignore warnings SQL Alchemy
+    warnings.filterwarnings('ignore', message='pandas only supports SQLAlchemy connectable')
     # Create mirror table in SQL Server if it doesn't exist
     cursor_sql = conn_sql.cursor()
     try:
@@ -101,3 +104,5 @@ finally:
         conn_sql.close()
     if 'conn_oracle' in locals():
         conn_oracle.close()
+
+
